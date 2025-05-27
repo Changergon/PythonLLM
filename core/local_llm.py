@@ -1,7 +1,7 @@
 import html
 import re
 from typing import List, Dict, Optional
-
+import copy
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -11,11 +11,15 @@ def wrap_code(text: str) -> str:
     return f"<pre><code>{html.escape(text.strip())}</code></pre>"
 
 def format_answer_with_code(text: str) -> str:
-    # Заменяем блоки кода на HTML <pre><code> для корректного отображения
     code_blocks = re.findall(r"```(.*?)```", text, re.DOTALL)
     for block in code_blocks:
         text = text.replace(f"```{block}```", wrap_code(block))
-    return text.replace("\n", "<br>")
+    # Заменяем двойные переносы строк на <br><br> для абзацев,
+    # одиночные — оставляем, чтобы текст был читаемым
+    text = text.replace("\n\n", "<br><br>")
+    text = text.replace("\n", " ")
+    return text
+
 
 def _load_model(model_name: str):
     try:
@@ -60,11 +64,12 @@ class LocalLLM:
             {% endfor %}"""
 
     def _prepare_prompt(self, message: str, history: List[Dict[str, str]]) -> str:
-        # Формируем системное сообщение, где просим давать код с объяснениями
         messages = [
             {"role": "system", "content": (
                 "Ты — опытный Python-разработчик. "
-                "Отвечай на вопросы с пояснениями и примерами кода в блоках ```python ... ```."
+                "Отвечай понятно, с пояснениями и примерами кода в блоках ```python ... ``` там, где это уместно. "
+                "Не ограничивайся только кодом — давай и текстовые объяснения. "
+                "Не повторяй вопросы, а отвечай на них развернуто."
             )},
             *history,
             {"role": "user", "content": message}
@@ -73,7 +78,12 @@ class LocalLLM:
 
     def send_message(self, message: str, history: Optional[List[Dict[str, str]]] = None) -> str:
         try:
-            target_history = history if history is not None else self.default_history
+            # Сделать копию истории, чтобы не мутировать исходную
+            if history is not None:
+                target_history = copy.deepcopy(history)
+            else:
+                target_history = copy.deepcopy(self.default_history)
+
             target_history.append({"role": "user", "content": message})
             target_history = target_history[-MAX_HISTORY_LEN:]
 
@@ -93,6 +103,11 @@ class LocalLLM:
             response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
 
             target_history.append({"role": "assistant", "content": response})
+
+            # Если используешь self.default_history — обнови её
+            if history is None:
+                self.default_history = target_history
+
             return format_answer_with_code(response)
 
         except Exception as e:
