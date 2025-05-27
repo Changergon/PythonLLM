@@ -14,12 +14,9 @@ def format_answer_with_code(text: str) -> str:
     code_blocks = re.findall(r"```(.*?)```", text, re.DOTALL)
     for block in code_blocks:
         text = text.replace(f"```{block}```", wrap_code(block))
-    # Заменяем двойные переносы строк на <br><br> для абзацев,
-    # одиночные — оставляем, чтобы текст был читаемым
     text = text.replace("\n\n", "<br><br>")
     text = text.replace("\n", " ")
     return text
-
 
 def _load_model(model_name: str):
     try:
@@ -54,31 +51,21 @@ class LocalLLM:
 
         if "TinyLlama" in model_name:
             self.tokenizer.chat_template = """{% for message in messages %}
-                {% if message['role'] == 'user' %}
-                    {{ '<|user|>\\n' + message['content'] + '<|end|>\\n<|assistant|>\\n' }}
-                {% elif message['role'] == 'system' %}
-                    {{ '<|system|>\\n' + message['content'] + '<|end|>\\n' }}
-                {% else %}
-                    {{ message['content'] + '<|end|>\\n' }}
-                {% endif %}
-            {% endfor %}"""
+            {{ message['role'] + ': ' + message['content'] + '\\n' }}
+            {% endfor %}assistant: """
 
-    def _prepare_prompt(self, message: str, history: List[Dict[str, str]]) -> str:
+    def _prepare_prompt(self, history: List[Dict[str, str]]) -> str:
         messages = [
             {"role": "system", "content": (
-                "Ты — опытный Python-разработчик. "
-                "Отвечай понятно, с пояснениями и примерами кода в блоках ```python ... ``` там, где это уместно. "
-                "Не ограничивайся только кодом — давай и текстовые объяснения. "
-                "Не повторяй вопросы, а отвечай на них развернуто."
-            )},
-            *history,
-            {"role": "user", "content": message}
+                "Ты помощник-программист. Отвечай коротко, понятно и по теме."
+            )}
+            ,
+            *history
         ]
         return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     def send_message(self, message: str, history: Optional[List[Dict[str, str]]] = None) -> str:
         try:
-            # Сделать копию истории, чтобы не мутировать исходную
             if history is not None:
                 target_history = copy.deepcopy(history)
             else:
@@ -87,12 +74,12 @@ class LocalLLM:
             target_history.append({"role": "user", "content": message})
             target_history = target_history[-MAX_HISTORY_LEN:]
 
-            prompt = self._prepare_prompt(message, target_history)
+            prompt = self._prepare_prompt(target_history)
             inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
 
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=1024,
+                max_new_tokens=512,
                 temperature=0.7,
                 top_p=0.9,
                 repetition_penalty=1.2,
@@ -104,7 +91,6 @@ class LocalLLM:
 
             target_history.append({"role": "assistant", "content": response})
 
-            # Если используешь self.default_history — обнови её
             if history is None:
                 self.default_history = target_history
 
