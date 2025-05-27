@@ -173,9 +173,25 @@ class MainWindow(QMainWindow):
     def process_compare(self, message):
         """Обработка сообщения в режиме сравнения"""
         try:
-            # Обрабатываем сообщение для обеих моделей
-            self.process_gigachat(message)
-            self.process_local(message)
+            # Добавляем сообщение в истории обеих моделей
+            self.history_giga.append({"role": "user", "content": message})
+            self.history_local.append({"role": "user", "content": message})
+
+            # Получаем ответы от обеих моделей
+            answer_giga = self.gigachat.send_message(message, history=self.history_giga)
+            answer_local = self.local_llm.send_message(message, history=self.history_local)
+
+            # Добавляем ответы в соответствующие истории
+            self.history_giga.append({"role": "assistant", "content": answer_giga})
+            self.history_local.append({"role": "assistant", "content": answer_local})
+
+            # Сохраняем в базу данных
+            self.db.add_message(model="gigachat", role="assistant", content=answer_giga)
+            self.db.add_message(model="local_llm", role="assistant", content=answer_local)
+
+            # Отображаем ответы в интерфейсе
+            self.chat_display.append(f"<b>GigaChat:</b> {answer_giga}<br>")
+            self.chat_display.append(f"<b>Local LLM:</b> {answer_local}<br>")
 
             # Показываем кнопки оценок
             self.rating_given_giga = False

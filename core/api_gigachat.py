@@ -1,19 +1,22 @@
+import html
+import re
 import time
 import uuid
-import re
+
 import requests
 
+GIGACHAT_MODEL = "GigaChat"
+MAX_HISTORY_LEN = 10
+
+
+def wrap_code(text: str) -> str:
+    return f"<pre><code>{html.escape(text.strip())}</code></pre>"
 
 def format_answer_with_code(text):
-    # Преобразуем блоки кода вида ```...``` в HTML <pre><code>
     code_blocks = re.findall(r"```(.*?)```", text, re.DOTALL)
     for block in code_blocks:
-        html_block = f"<pre><code>{block.strip()}</code></pre>"
-        text = text.replace(f"```{block}```", html_block)
-
-    # Экранируем переносы строк
-    text = text.replace("\n", "<br>")
-    return text
+        text = text.replace(f"```{block}```", wrap_code(block))
+    return text.replace("\n", "<br>")
 
 
 class GigaChatDialogue:
@@ -28,17 +31,12 @@ class GigaChatDialogue:
         url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
         rq_uid = str(uuid.uuid4())
         payload = "scope=GIGACHAT_API_PERS"
-
-        # Ключ уже base64, не кодируем заново
-        basic_auth_str = self.api_key
-
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
             "RqUID": rq_uid,
-            "Authorization": f"Basic {basic_auth_str}"
+            "Authorization": f"Basic {self.api_key}"
         }
-
         response = requests.post(url, headers=headers, data=payload, verify=False)
         if response.status_code != 200:
             raise Exception(f"Ошибка авторизации: {response.status_code} | {response.text}")
@@ -48,29 +46,18 @@ class GigaChatDialogue:
         self.token_expires_at = time.time() + data.get("expires_in", 3600) - 60
 
     def send_message(self, message, history=None):
-        # Проверка и обновление токена
         if time.time() >= self.token_expires_at:
             self._get_token()
 
-        # Если история не передана, используем внутреннюю
-        if history is None:
-            self.history.append({"role": "user", "content": message})
-            messages_to_send = self.history
-        else:
-            history.append({"role": "user", "content": message})
-            messages_to_send = history
+        target_history = history if history is not None else self.history
+        target_history.append({"role": "user", "content": message})
+        target_history = target_history[-MAX_HISTORY_LEN:]
 
         chat_url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.token}"
-        }
-        payload = {
-            "model": "GigaChat",
-            "messages": messages_to_send
-        }
+        headers = {"Authorization": f"Bearer {self.token}"}
+        payload = {"model": GIGACHAT_MODEL, "messages": target_history}
 
         response = requests.post(chat_url, headers=headers, json=payload, verify=False)
-
         if response.status_code == 403:
             self._get_token()
             headers["Authorization"] = f"Bearer {self.token}"
@@ -80,10 +67,5 @@ class GigaChatDialogue:
             raise Exception(f"Ошибка запроса: {response.status_code} | {response.text}")
 
         answer = response.json()["choices"][0]["message"]["content"]
-
-        if history is None:
-            self.history.append({"role": "assistant", "content": answer})
-        else:
-            history.append({"role": "assistant", "content": answer})
-
+        target_history.append({"role": "assistant", "content": answer})
         return format_answer_with_code(answer)
