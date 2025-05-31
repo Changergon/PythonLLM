@@ -1,4 +1,3 @@
-# core/comparison.py
 from threading import Thread
 
 from core.api_gigachat import GigaChatDialogue
