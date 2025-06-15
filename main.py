@@ -1,3 +1,4 @@
+#C:\PyProject\PythonLLM\main.py
 from PyQt5.QtWidgets import QApplication
 from ui.main_window import MainWindow
 from core.database import DialogueDB

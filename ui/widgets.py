@@ -1,3 +1,4 @@
+#C:\PyProject\PythonLLM\ui\widgets.py
 from PyQt5.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 
 class ChatWidget(QWidget):
