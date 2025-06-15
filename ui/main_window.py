@@ -1,15 +1,19 @@
 #C:\PyProject\PythonLLM\ui\main_window.py
+import json
+
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLineEdit, QWidget, QLabel, QTextBrowser)
+
 from core.api_gigachat import GigaChatDialogue
 from core.local_llm import LocalLLM
+from core.stats import RatingPlotWidget
 
 
 class MainWindow(QMainWindow):
     def __init__(self, db, ratings):
         super().__init__()
         self.db = db
-        self.ratings = ratings
+        self.ratings = ratings  # Используем переданный RatingSystem
 
         # Инициализация моделей
         self.gigachat = GigaChatDialogue(
@@ -21,8 +25,6 @@ class MainWindow(QMainWindow):
 
         # Состояние приложения
         self.mode = "gigachat"  # Текущий режим работы
-        self.gigachat_scores = []  # Оценки для GigaChat
-        self.local_scores = []  # Оценки для LocalLLM
         self.rating_given_giga = False  # Флаг оценки GigaChat
         self.rating_given_local = False  # Флаг оценки LocalLLM
 
@@ -84,11 +86,6 @@ class MainWindow(QMainWindow):
         self.chat_display.append(f"<i>Режим переключен на: {mode}</i><br>")
         self.clear_ratings_ui()
 
-        # Очистка оценок при смене режима
-        if mode != "compare":
-            self.gigachat_scores.clear()
-            self.local_scores.clear()
-
     def clear_ratings_ui(self):
         """Очистка панели оценок"""
         while self.rating_layout.count():
@@ -121,21 +118,42 @@ class MainWindow(QMainWindow):
             self.process_compare(message)
 
     def handle_session_end(self):
-        """Обработка завершения сессии"""
+        """Обработка завершения сессии с выводом диаграмм в GUI."""
         self.chat_display.append("<i>Диалог завершён пользователем.</i><br>")
 
-        # Вывод средних оценок
-        avg_giga = sum(self.gigachat_scores) / len(self.gigachat_scores) if self.gigachat_scores else 0
-        avg_local = sum(self.local_scores) / len(self.local_scores) if self.local_scores else 0
+        # Получаем статистику
+        stats = self.ratings.get_stats()
+        avg_giga = stats["gigachat"]["average"]
+        avg_local = stats["local_llm"]["average"]
         self.chat_display.append(f"<b>Средняя оценка GigaChat:</b> {avg_giga:.2f}<br>")
         self.chat_display.append(f"<b>Средняя оценка Local LLM:</b> {avg_local:.2f}<br>")
 
+        # Только в режиме сравнения
+        if self.mode == "compare":
+            self.show_rating_plots()
+
         # Очистка состояния
-        self.gigachat_scores.clear()
-        self.local_scores.clear()
         self.message_input.clear()
         self.message_input.setEnabled(False)
         self.send_button.setEnabled(False)
+
+    def show_rating_plots(self):
+        """Показывает диаграммы оценок в интерфейсе."""
+        # Удаляем старые диаграммы (если есть)
+        for i in reversed(range(self.rating_layout.count())):
+            self.rating_layout.itemAt(i).widget().setParent(None)
+
+        # Загружаем данные
+        with open(self.ratings.file, 'r') as f:
+            ratings_data = json.load(f)
+
+        # Создаем и добавляем виджеты с диаграммами
+        giga_plot = RatingPlotWidget(ratings_data, "gigachat", self)
+        local_plot = RatingPlotWidget(ratings_data, "local_llm", self)
+
+        # Размещаем диаграммы в layout
+        self.rating_layout.addWidget(giga_plot)
+        self.rating_layout.addWidget(local_plot)
 
     def process_gigachat(self, message):
         """Обработка сообщения для GigaChat"""
@@ -205,11 +223,11 @@ class MainWindow(QMainWindow):
     def rate_model(self, model_name, score):
         """Обработка оценки модели"""
         if model_name == "gigachat" and not self.rating_given_giga:
-            self.gigachat_scores.append(score)
+            self.ratings.add_rating("gigachat", score)  # Сохраняем через RatingSystem
             self.chat_display.append(f"<i>Вы оценили GigaChat: {score}</i><br>")
             self.rating_given_giga = True
         elif model_name == "local_llm" and not self.rating_given_local:
-            self.local_scores.append(score)
+            self.ratings.add_rating("local_llm", score)  # Сохраняем через RatingSystem
             self.chat_display.append(f"<i>Вы оценили Local LLM: {score}</i><br>")
             self.rating_given_local = True
 
@@ -221,9 +239,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Обработка закрытия окна"""
-        if self.gigachat_scores or self.local_scores:
-            avg_giga = sum(self.gigachat_scores) / len(self.gigachat_scores) if self.gigachat_scores else 0
-            avg_local = sum(self.local_scores) / len(self.local_scores) if self.local_scores else 0
-            self.chat_display.append(f"<b>Средняя оценка GigaChat:</b> {avg_giga:.2f}<br>")
-            self.chat_display.append(f"<b>Средняя оценка Local LLM:</b> {avg_local:.2f}<br>")
+        stats = self.ratings.get_stats()
+        avg_giga = stats["gigachat"]["average"]
+        avg_local = stats["local_llm"]["average"]
+        self.chat_display.append(f"<b>Средняя оценка GigaChat:</b> {avg_giga:.2f}<br>")
+        self.chat_display.append(f"<b>Средняя оценка Local LLM:</b> {avg_local:.2f}<br>")
         super().closeEvent(event)

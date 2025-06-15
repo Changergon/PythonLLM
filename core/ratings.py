@@ -31,3 +31,7 @@ class RatingSystem:
             "local_llm": _calculate_stats(data["local_llm"])
         }
 
+    def get_raw_data(self):
+        """Возвращает сырые данные оценок из файла."""
+        with open(self.file, 'r') as f:
+            return json.load(f)
